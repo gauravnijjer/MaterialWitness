@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Material Witness — Gaurav Singh Nijjer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.20.0/dist/tf-converter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.20.0/dist/tf-backend-webgl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js"></script>
+<style>
+  :root {
+    --panel-bg: rgba(8, 9, 10, 0.92);
+    --panel-ink: #d8d4c8;
+    --panel-dim: #7a7668;
+    --panel-line: rgba(216, 212, 200, 0.14);
+    --accent: #b8875a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #060708; overflow: hidden; }
+  body { font-family: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw !important; height: 100vh !important; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+
+  #title {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; pointer-events: none;
+    color: #d8d4c8; text-align: center; z-index: 20;
+    transition: opacity 4s ease; opacity: 1;
+  }
+  #title h1 { font-weight: 400; font-size: clamp(22px, 3.2vw, 44px); letter-spacing: 0.35em; }
+  #title p  { margin-top: 14px; font-size: 12px; letter-spacing: 0.22em; color: #7a7668; }
+  #title .intro {
+    margin-top: 26px; max-width: 44ch; font-size: 13px; line-height: 1.75;
+    letter-spacing: 0.04em; text-transform: none; color: #a8a294;
+  }
+
+  #panel {
+    position: fixed; top: 0; left: 0; height: 100%; width: 300px;
+    background: var(--panel-bg); color: var(--panel-ink);
+    border-right: 1px solid var(--panel-line);
+    transform: translateX(-100%);
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 30; display: flex; flex-direction: column;
+    backdrop-filter: blur(6px);
+  }
+  #panel.open { transform: translateX(0); }
+  #panel header { padding: 18px 18px 12px; border-bottom: 1px solid var(--panel-line); }
+  #panel header h2 { font-weight: 400; font-size: 13px; letter-spacing: 0.3em; }
+  #panel header .reading { margin-top: 8px; font-size: 11px; color: var(--panel-dim); letter-spacing: 0.1em; }
+  #panel header .reading b { color: var(--accent); font-weight: 400; }
+  #controls { flex: 1; overflow-y: auto; padding: 12px 18px; scrollbar-width: thin; }
+  .ctl { margin: 14px 0; }
+  .ctl label { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .ctl label span.val { color: var(--panel-dim); }
+  .ctl input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 2px;
+    background: var(--panel-line); outline: none; cursor: pointer;
+  }
+  .ctl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 11px; height: 11px;
+    border-radius: 50%; background: var(--panel-ink); border: none;
+  }
+  .ctl input[type=range]::-moz-range-thumb { width: 11px; height: 11px; border-radius: 50%; background: var(--panel-ink); border: none; }
+  .row { display: flex; gap: 8px; margin: 14px 0; }
+  .row button {
+    flex: 1; background: transparent; color: var(--panel-ink);
+    border: 1px solid var(--panel-line); padding: 8px 6px;
+    font: inherit; font-size: 11px; letter-spacing: 0.08em; cursor: pointer;
+  }
+  .row button:hover { border-color: var(--panel-ink); }
+  .seedline { font-size: 11px; color: var(--panel-dim); letter-spacing: 0.08em; margin: 10px 0 4px; }
+  .seedline b { color: var(--panel-ink); font-weight: 400; }
+  .divider { border: none; border-top: 1px solid var(--panel-line); margin: 16px 0; }
+  #panel footer { padding: 12px 18px 16px; border-top: 1px solid var(--panel-line); font-size: 10px; color: var(--panel-dim); line-height: 1.6; }
+  #panel footer a { color: var(--panel-dim); }
+  #hint { position: fixed; bottom: 14px; left: 16px; z-index: 15; font-size: 10px; letter-spacing: 0.16em; color: rgba(216,212,200,0.4); transition: opacity 3s ease; pointer-events: none; }
+  #rec {
+    position: fixed; top: 16px; right: 18px; z-index: 40;
+    display: none; align-items: center; gap: 8px;
+    font-size: 11px; letter-spacing: 0.16em; color: #e6d2cc; pointer-events: none;
+  }
+  #rec.on { display: flex; }
+  #cam {
+    position: fixed; bottom: 14px; right: 18px; z-index: 16;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10px; letter-spacing: 0.16em; color: rgba(216,212,200,0.55);
+    pointer-events: none; transition: opacity 1.2s ease;
+  }
+  #cam .cdot { width: 7px; height: 7px; border-radius: 50%; background: #7a7668; }
+  #cam .cdot.live { background: #6fbf73; }
+  #cam .cdot.err  { background: #d8443f; }
+  #rec .dot { width: 9px; height: 9px; border-radius: 50%; background: #d8443f; animation: recpulse 1.4s ease-in-out infinite; }
+  @keyframes recpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+</style>
+</head>
+<body>
+
+<div id="title">
+  <h1>MATERIAL&nbsp;WITNESS</h1>
+  <p>Gaurav Singh Nijjer</p>
+  <p class="intro">Step closer and the work finds you. Rock, rust, river deltas and
+  plant cells cross your outline, and what is close and what is far stop being
+  different questions.</p>
+</div>
+<div id="hint">S — settings&nbsp;·&nbsp;1-5 — disturbance&nbsp;·&nbsp;C — camera&nbsp;·&nbsp;R — record&nbsp;·&nbsp;scroll — zoom</div>
+<div id="cam"><span class="cdot" id="camDot"></span><span id="camMsg">camera off</span></div>
+<div id="rec"><span class="dot"></span><span id="recTime">REC 0:00</span></div>
+
+<div id="panel">
+  <header>
+    <h2>MATERIAL WITNESS</h2>
+    <div class="reading">reading&nbsp;&nbsp;<b id="readingName">—</b></div>
+  </header>
+  <div id="controls"></div>
+  <footer>
+    One height field, six shared primitives. A live camera finds the body
+    and disturbs that surface as it moves.<br>
+    Made with Claude.<br>
+    © <a href="https://gauravnijjer.com" target="_blank" rel="noopener">Gaurav Singh Nijjer</a> 2026
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   CLOSE | FAR — one surface (v3)
+   A single GPU material with six shared primitives:
+     net A / net B  organic cellular webs
+     ring           concentric / spiral field
+     dots           point field (pores, bubbles, LEDs, stars)
+     grid           rectilinear traces (circuits, chips, fabric, panels)
+     stripe         anisotropic bands (wires, metal, muscle, water, grain)
+   All summed into one height field, lit in 3D with two lamps,
+   specular, metal fresnel, ambient occlusion, height fog and a
+   camera-driven parallax. 30 readings are only reweightings.
+   ============================================================ */
+
+/* ---------------- CONFIG ---------------- */
+const CONFIG = {
+  seed: 20260714,
+  animationSpeed: 1.0,
+  stateSeconds: 45,
+  detail: 1.0,      // global magnification multiplier (per-state zoom rides on top)
+  warp: 1.0,
+  relief: 1.0,
+  gloss: 1.0,
+  depth: 1.0,       // parallax / 3D strength multiplier
+  quality: 1.0,
+  brightness: 1.0,
+  contrast: 1.0,
+  paused: false,
+  manual: false,
+  manualPos: 0,
+
+  /* ---- live body ----
+     The surface is always whole. A visitor disturbs it rather than revealing it. */
+  camera: true,          // try to open the webcam on load
+  bodyMode: 5,           // 1 presence 2 ripple 3 lens 4 swirl 5 turbulence
+  mirror: true,          // mirror the camera, so moving right moves right
+  bodyStrength: 0.20,    // low: stillness barely marks the surface
+  motionAmp: 3.0,        // movement carries almost all of the effect
+  edgeWidth: 0.10,       // tight influence zone, so the boil hugs the contour
+  edgeSharp: 5.0,        // a fine drawn line, not a soft band
+  outlineGlow: 0.0,      // no lift: the body shows only as displacement
+  maskSmooth: 0.90,      // heavy smoothing, the silhouette settles slowly
+  motionLag: 0.90,       // lag of the second mask; the gap is read as motion
+  segFps: 15,            // segmentation rate, decoupled from render
+};
+const DEFAULTS = JSON.parse(JSON.stringify(CONFIG));
+
+const BINDINGS = [
+  { key: 'animationSpeed', label: 'Animation speed',     min: 0.05, max: 3,   step: 0.05 },
+  { key: 'stateSeconds',   label: 'Transition duration', min: 2,    max: 180, step: 1, fmt: v => v + 's' },
+  { key: 'detail',         label: 'Magnification',       min: 0.4,  max: 2.5, step: 0.05 },
+  { key: 'depth',          label: '3D depth',            min: 0,    max: 2.5, step: 0.05 },
+  { key: 'warp',           label: 'Warp strength',       min: 0,    max: 2.2, step: 0.05 },
+  { key: 'relief',         label: 'Relief depth',        min: 0,    max: 2.2, step: 0.05 },
+  { key: 'gloss',          label: 'Glossiness',          min: 0,    max: 2.2, step: 0.05 },
+  { key: 'quality',        label: 'Render quality',      min: 0.4,  max: 1,   step: 0.05 },
+  { key: 'brightness',     label: 'Brightness',          min: 0.5,  max: 1.6, step: 0.02 },
+  { key: 'contrast',       label: 'Contrast',            min: 0.6,  max: 1.6, step: 0.02 },
+];
+
+// shown under the Body heading in the panel
+const BODY_BINDINGS = [
+  { key: 'bodyStrength', label: 'Disturbance',     min: 0,    max: 2.5, step: 0.01 },
+  { key: 'motionAmp',    label: 'Motion response', min: 0,    max: 3,   step: 0.05 },
+  { key: 'edgeWidth',    label: 'Influence width', min: 0.1,  max: 3.5, step: 0.05 },
+  { key: 'edgeSharp',    label: 'Outline tightness', min: 0.4, max: 5,  step: 0.05 },
+  { key: 'outlineGlow',  label: 'Outline visibility', min: 0, max: 1.5, step: 0.02 },
+  { key: 'maskSmooth',   label: 'Mask smoothing',  min: 0,    max: 0.9, step: 0.02 },
+];
+// index 0 unused: modes are addressed 1-5 to match the number keys
+const BODY_MODES = ['', 'presence', 'ripple', 'lens', 'swirl', 'turbulence'];
+
+/* ---------------- state defaults ----------------
+   Every reading overrides only what makes it distinct;
+   anything unspecified falls back to SDEF, so states stay short. */
+const SDEF = {
+  netA:0, widthA:0.06, scaleA:2.6, netB:0, widthB:0.05, scaleB:8.0, facet:0.05,
+  ring:0, ringFreq:8, ringSharp:1.3, ringWobble:0.5, ringBreak:0.2, spiral:0, logR:0,
+  dots:0, dotSize:0.12, dotH:0.3, dotDensity:0.5, dotColW:0.4, star:0,
+  grid:0, gridScale:3.0, gridWidth:0.10, gridDensity:0.6,
+  stripe:0, stripeAngle:0.6, stripeFreq:16, stripeSharp:1.2, stripeWobble:0.4,
+  warp:0.4, patch:0.4, relief:0.7, gloss:0.4, metal:0.0, lightW:1.0,
+  nebula:0, emissive:0, depth:0.06, fog:0.3, zoom:1.0, crestW:0.6,
+};
+const NUM_KEYS = Object.keys(SDEF);
+const COL_KEYS = ['c1','c2','c3','c4','c5','c6'];
+
+/* ---------------- 30 readings ---------------- */
+const STATES = [
+  { name:'leaf veins',
+    netA:0.95, widthA:0.075, scaleA:2.2, netB:0.45, widthB:0.055, scaleB:7.0,
+    dots:0.12, dotSize:0.14, dotH:-0.30, dotColW:0.3, relief:0.65, crestW:0.95, zoom:1.05,
+    c1:[110,164,52], c2:[146,192,66], c3:[226,234,164], c4:[58,104,38], c5:[92,138,54], c6:[80,132,46] },
+
+  { name:'ink in water',
+    ring:0.20, ringFreq:3, ringSharp:0.9, ringWobble:1.2, spiral:0.35, logR:0.3,
+    dots:0.25, dotSize:0.10, dotH:0.2, dotDensity:0.4, dotColW:0.9,
+    warp:1.45, patch:1.0, relief:0.25, gloss:0.5, crestW:0.5, zoom:0.9,
+    c1:[238,234,224], c2:[226,220,206], c3:[250,248,240], c4:[96,104,150], c5:[40,50,120], c6:[30,40,110] },
+
+  { name:'bricks',
+    grid:1.0, gridScale:2.6, gridWidth:0.07, gridDensity:0.95,
+    stripe:0.20, stripeAngle:0.0, stripeFreq:16, stripeSharp:1.0, stripeWobble:0.15,
+    warp:0.12, patch:0.35, relief:0.8, gloss:0.1, crestW:0.9, zoom:1.0,
+    c1:[188,92,64], c2:[166,76,52], c3:[222,210,196], c4:[110,50,36], c5:[200,120,90], c6:[150,66,48] },
+
+  { name:'petals',
+    ring:0.80, ringFreq:3.5, ringSharp:0.9, ringWobble:0.9, logR:0.3,
+    stripe:0.35, stripeAngle:1.3, stripeFreq:6, stripeSharp:1.0, stripeWobble:0.6,
+    warp:0.5, patch:0.45, relief:0.35, gloss:0.6, crestW:0.7, zoom:0.9,
+    c1:[244,196,206], c2:[238,172,190], c3:[252,236,240], c4:[190,90,120], c5:[230,150,170], c6:[246,214,180] },
+
+  { name:'circuit board',
+    grid:1.0, gridScale:3.2, gridWidth:0.09, gridDensity:0.5,
+    dots:0.4, dotSize:0.13, dotH:0.6, dotDensity:0.35, dotColW:0.9, emissive:0.35,
+    relief:0.75, gloss:0.9, metal:0.45, crestW:0.55, zoom:0.95, warp:0.12, patch:0.25,
+    c1:[46,120,86], c2:[64,150,104], c3:[222,186,100], c4:[22,66,48], c5:[140,244,170], c6:[54,134,94] },
+
+  { name:'blood vessels',
+    netA:0.90, widthA:0.065, scaleA:2.0, netB:0.25, widthB:0.040, scaleB:6.5,
+    dots:0.2, dotSize:0.09, dotColW:0.4, relief:0.85, gloss:0.65, crestW:1.0, zoom:0.9, warp:0.55,
+    c1:[226,186,174], c2:[210,156,146], c3:[182,34,38], c4:[128,66,62], c5:[204,84,80], c6:[216,172,162] },
+
+  { name:'lines and circles',
+    stripe:1.0, stripeAngle:0.4, stripeFreq:7, stripeSharp:0.8, stripeWobble:0.2,
+    grid:0.30, gridScale:1.6, gridWidth:0.05, gridDensity:0.7,
+    dots:0.9, dotSize:0.24, dotH:0.3, dotDensity:0.35, dotColW:1.0,
+    warp:0.15, patch:0.5, relief:0.3, gloss:0.3, crestW:0.8, zoom:0.95,
+    c1:[240,232,216], c2:[230,220,200], c3:[60,58,54], c4:[150,140,124], c5:[214,84,58], c6:[222,176,84] },
+
+  { name:'sand dunes',
+    ring:1.0, ringFreq:5, ringSharp:1.7, ringWobble:1.5, ringBreak:0.08, spiral:0.06, logR:0.12,
+    dots:0.08, relief:0.95, gloss:0.10, crestW:0.8, zoom:0.8, warp:0.85,
+    c1:[218,182,130], c2:[192,152,102], c3:[244,220,168], c4:[130,94,58], c5:[176,140,94], c6:[202,164,114] },
+
+  { name:'soap foam',
+    netB:-0.30, widthB:0.050, scaleB:6.0,
+    dots:1.0, dotSize:0.26, dotH:0.5, dotDensity:0.95, dotColW:0.3,
+    warp:0.4, patch:0.5, relief:0.6, gloss:1.8, metal:0.3, crestW:0.6, zoom:1.05,
+    c1:[214,226,234], c2:[198,214,226], c3:[248,252,254], c4:[150,170,190], c5:[235,220,240], c6:[200,190,225] },
+
+  { name:'fingerprints',
+    netB:-0.15, widthB:0.050, scaleB:9.0,
+    ring:1.0, ringFreq:16, ringSharp:1.35, ringWobble:0.60, ringBreak:0.42, spiral:0.18,
+    dots:0.45, dotSize:0.10, dotColW:0.85, relief:1.0, gloss:0.30, crestW:0.8, zoom:0.9,
+    c1:[202,166,138], c2:[176,134,108], c3:[228,202,172], c4:[86,58,42], c5:[236,228,210], c6:[148,112,86] },
+
+  { name:'golden galaxy',
+    ring:0.60, ringFreq:2.6, ringSharp:0.85, ringWobble:0.55, ringBreak:0.25, spiral:2.4, logR:0.88,
+    dots:0.85, dotSize:0.10, dotH:0.05, dotDensity:0.6, dotColW:0.0, star:0.85,
+    relief:0.15, gloss:0.0, lightW:0.35, nebula:0.45, zoom:0.75, crestW:0.4, warp:0.55, depth:0.12, fog:0.0,
+    c1:[44,56,104], c2:[62,66,124], c3:[236,214,158], c4:[26,32,68], c5:[252,246,230], c6:[150,110,160] },
+
+  { name:'mosaic tiles',
+    netB:-0.90, widthB:0.090, scaleB:5.0, facet:0.50,
+    warp:0.15, patch:1.0, relief:0.9, gloss:0.9, crestW:0.6, zoom:1.0,
+    c1:[210,120,80], c2:[230,170,100], c3:[244,220,170], c4:[150,142,130], c5:[180,80,90], c6:[60,150,150] },
+
+  { name:'flowing water',
+    stripe:0.7, stripeAngle:0.2, stripeFreq:9, stripeSharp:1.0, stripeWobble:1.3,
+    ring:0.55, ringFreq:6, ringSharp:1.0, ringWobble:1.4, spiral:0.12, logR:0.1,
+    relief:0.45, gloss:1.7, metal:0.35, crestW:0.6, zoom:0.85, warp:0.95, depth:0.10,
+    c1:[56,110,138], c2:[80,140,166], c3:[200,228,240], c4:[24,60,84], c5:[136,182,202], c6:[64,118,144] },
+
+  { name:'honeycomb',
+    netB:1.0, widthB:0.10, scaleB:5.0, facet:0.04,
+    dots:0.25, dotSize:0.30, dotH:-0.5, dotDensity:0.3, dotColW:0.2,
+    warp:0.15, patch:0.25, relief:1.0, gloss:0.6, crestW:0.9, zoom:1.0,
+    c1:[210,152,52], c2:[232,180,74], c3:[248,216,132], c4:[132,86,28], c5:[172,114,40], c6:[190,132,48] },
+
+  { name:'rust and corrosion',
+    netB:-0.25, scaleB:8.5, dots:1.0, dotSize:0.20, dotH:0.7, dotDensity:0.85, dotColW:0.55,
+    relief:1.05, gloss:0.35, metal:0.3, crestW:0.5, zoom:1.05, warp:0.45, patch:1.0,
+    c1:[164,82,48], c2:[196,116,70], c3:[222,168,104], c4:[62,76,84], c5:[74,132,132], c6:[52,104,114] },
+
+  { name:'microscopic plant cells',
+    netA:0.12, widthA:0.080, scaleA:1.8, netB:0.95, widthB:0.070, scaleB:5.5, facet:0.08,
+    dots:0.35, dotSize:0.16, dotH:-0.35, dotColW:0.45, relief:0.75, gloss:0.55, crestW:0.85, zoom:1.15,
+    c1:[130,182,66], c2:[160,202,88], c3:[230,240,176], c4:[72,118,48], c5:[188,212,104], c6:[100,150,60] },
+
+  { name:'brushed metal',
+    stripe:1.0, stripeAngle:0.35, stripeFreq:64, stripeSharp:1.0, stripeWobble:0.10,
+    relief:0.30, gloss:2.0, metal:0.9, crestW:0.5, zoom:1.0, warp:0.15, patch:0.2,
+    c1:[132,136,142], c2:[162,167,174], c3:[222,226,232], c4:[82,84,90], c5:[204,208,214], c6:[112,116,122] },
+
+  { name:'river deltas',
+    netA:-0.85, widthA:0.085, scaleA:1.7, netB:-0.30, widthB:0.050, scaleB:5.5,
+    dots:0.1, dotColW:0.35, relief:0.55, gloss:0.45, crestW:0.45, zoom:0.82, warp:0.75,
+    c1:[184,166,126], c2:[158,140,104], c3:[214,198,160], c4:[46,96,106], c5:[104,148,154], c6:[140,154,114] },
+
+  { name:'terrazzo',
+    dots:1.0, dotSize:0.16, dotH:0.15, dotDensity:0.95, dotColW:1.0,
+    warp:0.15, patch:0.7, relief:0.25, gloss:0.8, crestW:0.4, zoom:1.05,
+    c1:[232,226,214], c2:[222,214,200], c3:[244,240,230], c4:[170,162,150], c5:[170,80,90], c6:[90,110,140] },
+
+  { name:'muscle fiber',
+    stripe:0.9, stripeAngle:0.95, stripeFreq:15, stripeSharp:1.25, stripeWobble:0.45,
+    netB:-0.15, relief:0.7, gloss:0.55, metal:0.15, crestW:0.6, zoom:1.05, warp:0.4, patch:0.4,
+    c1:[178,72,70], c2:[200,102,92], c3:[230,166,154], c4:[104,38,42], c5:[184,78,74], c6:[158,64,66] },
+
+  { name:'rock formations',
+    netB:-0.15, ring:1.0, ringFreq:8, ringSharp:2.4, ringWobble:1.9, ringBreak:0.08, spiral:0.06, logR:0.4,
+    dots:0.15, dotSize:0.09, dotH:-0.25, dotColW:0.3, relief:0.85, gloss:0.15, crestW:0.6, zoom:0.9, warp:0.6, patch:0.65,
+    c1:[180,116,72], c2:[146,92,58], c3:[218,168,110], c4:[82,52,36], c5:[110,70,46], c6:[164,128,88] },
+
+  { name:'cellular membranes',
+    netA:-0.25, widthA:0.060, scaleA:2.8, netB:-0.55, widthB:0.055, scaleB:7.5, facet:0.10,
+    dots:0.50, dotSize:0.14, dotH:0.4, dotDensity:0.6, dotColW:0.7, relief:0.55, gloss:0.55, crestW:0.4, zoom:1.05, warp:0.5, patch:0.6,
+    c1:[186,132,180], c2:[156,104,164], c3:[228,192,226], c4:[98,62,110], c5:[238,204,214], c6:[128,92,160] },
+
+  { name:'marble',
+    stripe:0.9, stripeAngle:0.7, stripeFreq:4, stripeSharp:2.2, stripeWobble:2.2,
+    warp:1.1, patch:0.3, relief:0.3, gloss:1.2, metal:0.2, crestW:0.5, zoom:0.95,
+    c1:[232,230,226], c2:[218,216,212], c3:[246,245,243], c4:[130,126,124], c5:[200,196,192], c6:[200,170,120] },
+
+  { name:'bacterial colonies',
+    netB:-0.10, ring:0.22, ringFreq:6, ringWobble:0.6, spiral:0.1, logR:0.2,
+    dots:1.0, dotSize:0.22, dotH:0.8, dotDensity:0.9, dotColW:0.55, relief:0.90, gloss:1.05, crestW:0.4, zoom:1.15, patch:0.45,
+    c1:[220,202,170], c2:[204,178,142], c3:[242,228,198], c4:[154,124,96], c5:[226,162,146], c6:[196,176,128] },
+
+  { name:'planetary surfaces',
+    netB:-0.20, scaleB:7.0, facet:0.06, ring:0.12, ringFreq:3, ringWobble:0.7, spiral:0.3, logR:0.4,
+    dots:1.0, dotSize:0.22, dotH:-0.95, dotDensity:0.72, dotColW:0.25, relief:1.25, gloss:0.06, crestW:0.5, zoom:0.88, patch:0.55,
+    c1:[166,104,72], c2:[138,86,60], c3:[204,148,104], c4:[66,40,30], c5:[110,68,50], c6:[130,88,64] },
+
+  { name:'woven fabric',
+    grid:0.9, gridScale:9.0, gridWidth:0.22, gridDensity:0.98,
+    stripe:0.25, stripeAngle:0.78, stripeFreq:36, stripeSharp:1.0,
+    relief:0.7, gloss:0.35, metal:0.1, crestW:0.6, zoom:1.05, warp:0.2, patch:0.45,
+    c1:[160,128,96], c2:[186,154,118], c3:[226,204,170], c4:[100,76,54], c5:[170,140,106], c6:[140,112,84] },
+
+  { name:'capillaries',
+    netA:0.70, widthA:0.030, scaleA:4.2, netB:0.35, widthB:0.028, scaleB:11.0,
+    dots:0.15, dotSize:0.07, dotColW:0.4, relief:0.60, gloss:0.50, crestW:1.0, zoom:1.2, warp:0.5,
+    c1:[230,200,192], c2:[218,172,166], c3:[194,56,54], c4:[146,84,82], c5:[210,98,92], c6:[224,184,176] },
+
+  { name:'crystalline mineral',
+    netB:0.30, widthB:0.070, scaleB:5.0, facet:0.55,
+    dots:0.1, relief:0.9, gloss:1.6, metal:0.55, crestW:0.7, zoom:1.0, warp:0.25, patch:0.5,
+    c1:[150,120,190], c2:[180,150,215], c3:[240,232,252], c4:[90,66,130], c5:[214,196,238], c6:[120,90,160] },
+
+  { name:'skin pores',
+    netA:-0.55, widthA:0.055, scaleA:3.4, netB:-0.45, widthB:0.045, scaleB:10.0, facet:0.13,
+    dots:0.55, dotSize:0.11, dotH:-0.6, dotDensity:0.55, dotColW:0.3, relief:0.95, gloss:0.9, crestW:0.45, zoom:1.1, warp:0.32,
+    c1:[220,164,138], c2:[196,134,110], c3:[240,198,172], c4:[128,78,64], c5:[156,98,82], c6:[206,144,120] },
+
+  { name:'machine panel',
+    grid:0.95, gridScale:2.4, gridWidth:0.16, gridDensity:0.45,
+    stripe:0.35, stripeAngle:0.0, stripeFreq:20, stripeSharp:1.0,
+    dots:0.5, dotSize:0.10, dotH:-0.5, dotDensity:0.3, dotColW:0.4,
+    relief:0.95, gloss:1.5, metal:0.8, crestW:0.5, zoom:0.9, warp:0.1, patch:0.4,
+    c1:[130,134,142], c2:[156,160,168], c3:[204,208,216], c4:[66,68,76], c5:[176,180,188], c6:[104,108,116] },
+];
+const NSTATES = STATES.length;
+
+/* ---------------- fragment shader ---------------- */
+const FRAG = `
+precision highp float;
+
+uniform vec2  uRes;
+uniform float uTime;
+uniform vec2  uSeed, uPan, uRingC;
+uniform float uRingPhase;
+uniform vec2  uCamPan;
+uniform float uCamZoom, uPersp;
+
+uniform float uNetA,uWidthA,uScaleA,uNetB,uWidthB,uScaleB,uFacet;
+uniform float uRing,uRingFreq,uRingSharp,uRingWobble,uRingBreak,uSpiral,uLogR;
+uniform float uDots,uDotSize,uDotH,uDotDensity,uDotColW,uStar;
+uniform float uGrid,uGridScale,uGridWidth,uGridDensity;
+uniform float uStripe,uStripeAngle,uStripeFreq,uStripeSharp,uStripeWobble;
+uniform float uWarp,uPatch,uRelief,uGloss,uMetal,uLightW,uNebula,uEmissive,uDepth,uFog,uZoom,uCrestW;
+uniform float uBrightness,uContrast,uDepthMul;
+
+/* live body: a disturbance in the surface, never a window through it */
+uniform sampler2D uMask;      /* smoothed silhouette */
+uniform sampler2D uMaskSlow;  /* lagged silhouette, difference gives motion */
+uniform float uHasMask;
+uniform float uBodyMode;      /* 1 presence 2 ripple 3 lens 4 swirl 5 turbulence */
+uniform vec2  uMaskScale, uMaskOffset;
+uniform float uMirror, uEdgeWidth, uEdgeSharp;
+uniform float uBodyStrength, uMotionAmp, uOutlineGlow;
+uniform vec3  uC1,uC2,uC3,uC4,uC5,uC6;
+
+float hash1(vec3 p){ p = fract(p*0.3183099 + 0.1); p *= 17.0;
+  return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+vec2 hash2(vec2 p){ return fract(sin(vec2(dot(p,vec2(127.1,311.7)),
+  dot(p,vec2(269.5,183.3))))*43758.5453); }
+
+float noise3(vec3 x){
+  vec3 i = floor(x), f = fract(x);
+  f = f*f*(3.0-2.0*f);
+  return mix(
+    mix(mix(hash1(i+vec3(0,0,0)), hash1(i+vec3(1,0,0)), f.x),
+        mix(hash1(i+vec3(0,1,0)), hash1(i+vec3(1,1,0)), f.x), f.y),
+    mix(mix(hash1(i+vec3(0,0,1)), hash1(i+vec3(1,0,1)), f.x),
+        mix(hash1(i+vec3(0,1,1)), hash1(i+vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm(vec3 p){
+  float v = 0.0, a = 0.5;
+  for(int i=0;i<4;i++){ v += a*noise3(p); p = p*2.03 + 19.7; a *= 0.5; }
+  return v;
+}
+
+vec3 vor(vec2 x){
+  vec2 n = floor(x), f = fract(x);
+  float F1 = 8.0, F2 = 8.0, id = 0.0;
+  for(int j=-1;j<=1;j++) for(int i=-1;i<=1;i++){
+    vec2 g = vec2(float(i), float(j));
+    vec2 o = hash2(n+g);
+    o = 0.5 + 0.4*sin(6.2831*o + uTime*0.03);
+    vec2 r = g + o - f;
+    float d = dot(r,r);
+    if(d < F1){ F2 = F1; F1 = d; id = hash1(vec3(n+g, 7.0)); }
+    else if(d < F2){ F2 = d; }
+  }
+  return vec3(sqrt(F1), sqrt(F2)-sqrt(F1), id);
+}
+
+// rectilinear traces: circuits, chips, fabric, panels
+float gridField(vec2 gp, float width, float density, out float pad){
+  vec2 id = floor(gp), f = fract(gp);
+  float rowH = step(hash1(vec3(id.y, 3.0, 0.0)), density);
+  float colV = step(hash1(vec3(id.x, 7.0, 0.0)), density);
+  float dH = abs(f.y-0.5), dV = abs(f.x-0.5);
+  float lineH = rowH * (1.0 - smoothstep(0.0, width, dH));
+  float lineV = colV * (1.0 - smoothstep(0.0, width, dV));
+  float tr = max(lineH, lineV);
+  float padM = rowH*colV;
+  float d = length(f-0.5);
+  pad = padM * (1.0 - smoothstep(0.0, width*2.4, d));
+  return max(tr, pad);
+}
+
+// anisotropic bands: wires, brushed metal, muscle, water, grain
+float stripeField(vec2 sp, float ang, float freq, float sharp, float wob){
+  vec2 dir = vec2(cos(ang), sin(ang));
+  float c = dot(sp, vec2(-dir.y, dir.x));
+  c += (fbm(vec3(sp*1.5, uTime*0.02))-0.5)*wob;
+  float b = 0.5 + 0.5*sin(c*freq);
+  return pow(b, sharp);
+}
+
+/* screen uv -> camera uv, cover-fitted and optionally mirrored */
+vec2 maskUV(vec2 suv){
+  vec2 m = suv * uMaskScale + uMaskOffset;
+  if(uMirror > 0.5) m.x = 1.0 - m.x;
+  return m;
+}
+float maskAt(vec2 suv){
+  vec2 m = maskUV(suv);
+  /* branch-free: clamp the fetch and zero it outside the camera frame, so
+     texture2D never sits in non-uniform flow (some drivers fault on that) */
+  vec2 inb = step(vec2(0.0), m) * step(m, vec2(1.0));
+  return texture2D(uMask, clamp(m, 0.0, 1.0)).r * inb.x * inb.y;
+}
+float maskSlowAt(vec2 suv){
+  vec2 m = maskUV(suv);
+  vec2 inb = step(vec2(0.0), m) * step(m, vec2(1.0));
+  return texture2D(uMaskSlow, clamp(m, 0.0, 1.0)).r * inb.x * inb.y;
+}
+
+/* One evaluation of the body field, 9 taps.
+   body   how far inside the silhouette
+   band   the boundary, peaked at the outline
+   grad   points out of the body, used as the push direction
+   motion where the silhouette differs from its lagged copy */
+void bodyField(vec2 suv, out float body, out float band, out vec2 grad, out float motion){
+  float r1 = uEdgeWidth * 0.010;
+  float r2 = r1 * 2.2;
+  float c  = maskAt(suv);
+  float l1 = maskAt(suv - vec2(r1, 0.0)), r_1 = maskAt(suv + vec2(r1, 0.0));
+  float d1 = maskAt(suv - vec2(0.0, r1)), u1  = maskAt(suv + vec2(0.0, r1));
+  float l2 = maskAt(suv - vec2(r2, 0.0)), r_2 = maskAt(suv + vec2(r2, 0.0));
+  float d2 = maskAt(suv - vec2(0.0, r2)), u2  = maskAt(suv + vec2(0.0, r2));
+
+  float b = (c + l1 + r_1 + d1 + u1 + l2 + r_2 + d2 + u2) / 9.0;
+  body = b;
+  band = clamp(pow(4.0 * b * (1.0 - b), uEdgeSharp), 0.0, 1.0);
+  grad = vec2((r_1 - l1) + (r_2 - l2) * 0.5, (u1 - d1) + (u2 - d2) * 0.5);
+  motion = clamp(abs(c - maskSlowAt(suv)) * 3.0, 0.0, 1.0);
+}
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / uRes.y;
+  vec2 cuv = uv / uCamZoom + uCamPan;
+  vec2 p = cuv * 3.0 * uZoom + uSeed + uPan;
+
+  float tSlow = uTime*0.02;
+  vec2 w = vec2(fbm(vec3(p*1.5, tSlow)), fbm(vec3(p*1.5 + 50.0, tSlow)));
+  p += (w - 0.5) * uWarp;
+
+  /* ---- the body disturbs the surface ----
+     The texture is never masked away. The silhouette displaces the coordinate
+     the surface is read from, so the material bends, gathers and boils around a
+     person instead of being cut by them. Held here, before the primitives are
+     sampled, so every one of the thirty readings inherits the same disturbance. */
+  float bBody = 0.0, bBand = 0.0, bMotion = 0.0;
+  vec2 bGrad = vec2(0.0);
+  if(uHasMask > 0.5){
+    vec2 suv = gl_FragCoord.xy / uRes;
+    bodyField(suv, bBody, bBand, bGrad, bMotion);
+
+    float amp = uBodyStrength * 0.55;
+    float mo  = 1.0 + bMotion * uMotionAmp * 3.0;   /* movement amplifies everything */
+    vec2 g = bGrad * 6.0;
+    vec2 disp = vec2(0.0);
+
+    if(uBodyMode < 1.5){
+      /* presence: the surface leans gently away from the body */
+      disp = g * amp * 0.5 * mo;
+    } else if(uBodyMode < 2.5){
+      /* ripple: pushed out hardest at the edge, wake trails the movement */
+      disp = g * amp * (0.5 + bBand * 2.5) * mo;
+      disp += g * bMotion * uMotionAmp * amp * 2.0;
+    } else if(uBodyMode < 3.5){
+      /* lens: the surface magnifies inside the silhouette. Shrinking the
+         screen-space term of p enlarges whatever is being read there. */
+      disp = -uv * 3.0 * uZoom * bBody * amp * 0.30 * mo;
+      disp += g * amp * 0.35;
+    } else if(uBodyMode < 4.5){
+      /* swirl: displacement turns tangential, the surface rotates around you */
+      vec2 t = vec2(-g.y, g.x);
+      disp = t * amp * (0.6 + bBand * 2.2) * mo;
+    } else {
+      /* turbulence: movement makes the material boil */
+      float n1 = fbm(vec3(p*3.0 + 41.0, uTime*0.35));
+      float n2 = fbm(vec3(p*3.0 + 88.0, uTime*0.35));
+      disp = (vec2(n1, n2) - 0.5) * amp * 2.2 * (bBand + bBody*0.5) * mo;
+      disp += g * amp * 0.4;
+    }
+    p += disp;
+  }
+
+  // camera-driven parallax: coarse height pushes the plane along the view ray
+  vec3 viewDir = normalize(vec3(uv*uPersp, 1.0));
+  float coarse = fbm(vec3(p*1.3 + 7.0, tSlow));
+  p += viewDir.xy * (coarse-0.5) * uDepth * uDepthMul;
+
+  vec3 vA = vor(p * uScaleA);
+  vec3 vB = vor(p * uScaleB);
+  float edgeA = 1.0 - smoothstep(0.0, uWidthA, vA.y);
+  float edgeB = 1.0 - smoothstep(0.0, uWidthB, vB.y);
+
+  vec2 rv = p - uRingC;
+  float r = length(rv), th = atan(rv.y, rv.x);
+  float rr = mix(r, log(r + 0.3)*1.2, uLogR);
+  rr += (fbm(vec3(p*2.2 + 31.0, tSlow)) - 0.5) * uRingWobble;
+  float phase = rr*uRingFreq - th*uSpiral + uRingPhase;
+  float ridge = pow(0.5 + 0.5*cos(phase*6.2831), uRingSharp);
+  float breakM = smoothstep(0.28, 0.44, fbm(vec3(p*2.6 + 13.7, tSlow*0.5)));
+  ridge *= mix(1.0, breakM, uRingBreak);
+
+  vec3 vD = vor(p * (uScaleB * 1.9));
+  float keep = step(fract(vD.z*7.31), uDotDensity);
+  float ds = uDotSize * (0.55 + 0.9*vD.z);
+  float q = clamp(1.0 - vD.x/max(ds, 1e-4), 0.0, 1.0);
+  float dome = q*q*(3.0-2.0*q) * keep;
+  float twinkle = 0.55 + 0.45*sin(uTime*(0.4 + vD.z*1.6) + vD.z*40.0);
+  float star = pow(q, 3.0) * keep * twinkle * uStar;
+
+  float pad = 0.0;
+  float grid = gridField(p * uGridScale, uGridWidth, uGridDensity, pad);
+  float stripe = stripeField(p, uStripeAngle, uStripeFreq, uStripeSharp, uStripeWobble);
+
+  float h = 0.0;
+  h += uNetA * edgeA + uNetB * edgeB;
+  h += (vA.z - 0.5) * uFacet;
+  h += uRing * ridge;
+  h += uDots * uDotH * dome;
+  h += uGrid * grid;
+  h += uStripe * (stripe - 0.5);
+  h += (fbm(vec3(p*3.5 + 77.0, tSlow)) - 0.5) * 0.18;
+
+  float n1 = fbm(vec3(p*1.7, tSlow + 3.0));
+  vec3 alb = mix(uC1, uC2, n1);
+  float patchM = smoothstep(0.52, 0.78, fbm(vec3(p*0.9 + 131.0, tSlow*0.7)));
+  alb = mix(alb, uC6, patchM * uPatch);
+  alb = mix(alb, uC4, smoothstep(0.05, -0.45, h));
+  alb = mix(alb, uC3, smoothstep(0.30, 0.85, h) * uCrestW);
+  alb = mix(alb, uC5, dome * uDots * uDotColW);
+  alb = mix(alb, uC4, uRing * (1.0 - ridge) * 0.55);
+  alb = mix(alb, uC3, uRing * ridge * 0.30 * uCrestW);
+  alb = mix(alb, uC3, uGrid * grid * 0.6);
+  alb = mix(alb, uC5, uGrid * pad * 0.85);
+  alb = mix(alb, uC3, uStripe * stripe * 0.22 * uCrestW);
+  alb = mix(alb, uC4, uStripe * (1.0-stripe) * 0.18);
+
+  float hs = h * uRelief * 1.4;
+  vec3 nrm = normalize(vec3(-dFdx(hs)*uRes.y*0.02, -dFdy(hs)*uRes.y*0.02, 1.0));
+  vec3 L1 = normalize(vec3(-0.45, 0.55, 0.72));
+  vec3 L2 = normalize(vec3(0.5, -0.3, 0.55));
+  vec3 V  = vec3(0.0, 0.0, 1.0);
+  float d1 = max(dot(nrm, L1), 0.0);
+  float d2 = max(dot(nrm, L2), 0.0) * 0.35;
+  vec3 Hh = normalize(L1 + V);
+  float spec = pow(max(dot(nrm, Hh), 0.0), mix(20.0, 90.0, uMetal)) * uGloss;
+  float fres = pow(1.0 - max(dot(nrm, V), 0.0), 3.0) * uMetal;
+  float ao = clamp(0.55 + h*0.6, 0.22, 1.0);
+
+  vec3 specCol = mix(vec3(1.0, 0.97, 0.9), alb*1.5, uMetal);
+  vec3 lit = alb*ao*(0.30 + 0.9*d1 + d2) + specCol*spec*0.6 + specCol*fres*0.5;
+  vec3 col = mix(alb*0.9, lit, uLightW);
+
+  col += uEmissive * uC5 * dome * (0.6 + 0.4*twinkle) * 4.0;
+
+  vec3 cloud = mix(vec3(0.42, 0.16, 0.26), vec3(0.16, 0.24, 0.5),
+                   fbm(vec3(p*1.1 + 211.0, tSlow*0.6)));
+  float nebField = fbm(vec3(p*1.6 + 91.0, tSlow*0.5));
+  col += uNebula * cloud * (nebField*nebField*0.9 + uRing*ridge*0.55);
+  col += vec3(star) * mix(vec3(1.0), uC5*1.6, 0.5);
+
+  // background parallax star layer for depth in space
+  if(uStar > 0.01){
+    vec2 p2 = p + viewDir.xy * uDepth * uDepthMul * 3.5 + vec2(11.0, 6.0);
+    vec3 vD2 = vor(p2 * (uScaleB*1.9));
+    float q2 = clamp(1.0 - vD2.x/max(ds,1e-4), 0.0, 1.0);
+    float star2 = pow(q2, 3.0) * step(fract(vD2.z*3.13), uDotDensity) * uStar * 0.5;
+    col += vec3(star2) * 0.55;
+  }
+
+  float depthFog = smoothstep(0.6, -0.4, h) * uFog;
+  col = mix(col, uC4*0.6, depthFog*0.3);
+
+  col = (col - 0.5) * uContrast + 0.5;
+  col *= uBrightness;
+  float vig = 1.0 - 0.32*dot(uv, uv);
+  col *= vig;
+
+  /* ---- the body as a faint presence in the image ----
+     No cutting, no masking. Just a slight lift along the silhouette so a
+     viewer can find their own outline inside the surface. */
+  if(uHasMask > 0.5){
+    float glow = bBand * uOutlineGlow * (0.6 + bMotion * 1.4);
+    col += col * glow * 0.55;
+    col += uC3 * glow * 0.16;
+    col *= 1.0 - bBody * 0.05;          /* the body sits a touch heavier */
+  }
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const VERT = `void main(){ gl_Position = vec4(position, 1.0); }`;
+
+/* ---------------- three.js ---------------- */
+let renderer, scene, camera, material;
+let T = 0, ringPhase = 0, lastReading = '';
+let panelOpen = false, currentSeed = CONFIG.seed;
+const U = {};
+const uName = k => 'u' + k.charAt(0).toUpperCase() + k.slice(1);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+// camera
+let camZoom = 1, camPanX = 0, camPanY = 0;
+let dragging = false, lastX = 0, lastY = 0, pinchDist = 0;
+
+function makeUniforms(){
+  const u = {
+    uRes:   { value: new THREE.Vector2(1,1) },
+    uTime:  { value: 0 },
+    uSeed:  { value: new THREE.Vector2(0,0) },
+    uPan:   { value: new THREE.Vector2(0,0) },
+    uRingC: { value: new THREE.Vector2(0,0) },
+    uRingPhase: { value: 0 },
+    uCamPan: { value: new THREE.Vector2(0,0) },
+    uCamZoom: { value: 1 },
+    uPersp: { value: 0.35 },
+    uDepthMul: { value: 1 },
+    uMask: { value: null },
+    uMaskSlow: { value: null },
+    uHasMask: { value: 0 },
+    uBodyMode: { value: 1 },
+    uMaskScale: { value: new THREE.Vector2(1,1) },
+    uMaskOffset: { value: new THREE.Vector2(0,0) },
+    uMirror: { value: 1 },
+    uEdgeWidth: { value: 1.0 },
+    uEdgeSharp: { value: 1.6 },
+    uBodyStrength: { value: 0.85 },
+    uMotionAmp: { value: 1.0 },
+    uOutlineGlow: { value: 0.30 },
+    uBrightness: { value: 1 }, uContrast: { value: 1 },
+  };
+  for (const k of NUM_KEYS) u[uName(k)] = { value: 0 };
+  for (const k of COL_KEYS) u['u' + k.toUpperCase()] = { value: new THREE.Vector3(0,0,0) };
+  return u;
+}
+
+function init(){
+  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+  renderer.domElement.id = 'art';
+  document.body.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  material = new THREE.ShaderMaterial({
+    vertexShader: VERT, fragmentShader: FRAG,
+    uniforms: makeUniforms(), depthTest: false, depthWrite: false,
+  });
+  material.extensions = { derivatives: true };
+  Object.assign(U, material.uniforms);
+  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+  applySeed(CONFIG.seed);
+  onResize();
+  window.addEventListener('resize', onResize);
+  window.addEventListener('keydown', onKey);
+  bindCamera();
+  buildUI();
+  setTimeout(() => { document.getElementById('title').style.opacity = 0; }, 12000);
+  setTimeout(() => { document.getElementById('hint').style.opacity = 0; }, 19000);
+  requestAnimationFrame(loop);
+  // camera is opened after first paint so the artwork is never blocked by it
+  if (CONFIG.camera) setTimeout(startCamera, 600);
+}
+
+function onResize(){
+  const q = CONFIG.quality;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * q);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  const dp = renderer.getDrawingBufferSize(new THREE.Vector2());
+  U.uRes.value.set(dp.x, dp.y);
+  updateMaskFit();
+}
+
+function onKey(e){
+  if (e.key === 's' || e.key === 'S') togglePanel();
+  else if (e.key === ' ') { e.preventDefault(); setPaused(!CONFIG.paused); }
+  else if (e.key === 'r' || e.key === 'R') toggleRecord();
+  else if (e.key === 'c' || e.key === 'C') segRunning ? stopCamera() : startCamera();
+  else if (e.key === 'm' || e.key === 'M') cycleBodyMode();
+  else if (e.key >= '1' && e.key <= '5') setBodyMode(parseInt(e.key, 10));
+  else if (e.key === '=' || e.key === '+') zoomBy(1.15);
+  else if (e.key === '-' || e.key === '_') zoomBy(1/1.15);
+  else if (e.key === '0') resetView();
+  else if (e.key === 'ArrowLeft')  camPanX -= 0.06/camZoom;
+  else if (e.key === 'ArrowRight') camPanX += 0.06/camZoom;
+  else if (e.key === 'ArrowUp')    camPanY += 0.06/camZoom;
+  else if (e.key === 'ArrowDown')  camPanY -= 0.06/camZoom;
+}
+
+function zoomBy(f, ox, oy){
+  const prev = camZoom;
+  camZoom = clamp(camZoom * f, 0.15, 14);
+  // keep the point under the cursor stable
+  if (ox !== undefined){
+    const uvx = (ox - window.innerWidth*0.5) / window.innerHeight;
+    const uvy = -(oy - window.innerHeight*0.5) / window.innerHeight;
+    camPanX += uvx*(1/prev - 1/camZoom);
+    camPanY += uvy*(1/prev - 1/camZoom);
+  }
+  updateZoomLabel();
+}
+function resetView(){ camZoom = 1; camPanX = 0; camPanY = 0; updateZoomLabel(); }
+
+function bindCamera(){
+  const c = renderer.domElement;
+  c.addEventListener('wheel', e => {
+    e.preventDefault();
+    zoomBy(Math.exp(-e.deltaY * 0.0016), e.clientX, e.clientY);
+  }, { passive: false });
+  c.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  window.addEventListener('mouseup', () => dragging = false);
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    camPanX -= dx / window.innerHeight / camZoom;
+    camPanY += dy / window.innerHeight / camZoom;
+  });
+  // touch: one finger pan, two finger pinch
+  c.addEventListener('touchstart', e => {
+    if (e.touches.length === 1){ dragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; }
+    else if (e.touches.length === 2){ dragging = false; pinchDist = touchDist(e); }
+  }, { passive: true });
+  c.addEventListener('touchmove', e => {
+    if (e.touches.length === 1 && dragging){
+      const dx = e.touches[0].clientX - lastX, dy = e.touches[0].clientY - lastY;
+      lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      camPanX -= dx / window.innerHeight / camZoom;
+      camPanY += dy / window.innerHeight / camZoom;
+    } else if (e.touches.length === 2){
+      const d = touchDist(e);
+      if (pinchDist > 0){
+        const mx = (e.touches[0].clientX + e.touches[1].clientX)/2;
+        const my = (e.touches[0].clientY + e.touches[1].clientY)/2;
+        zoomBy(d / pinchDist, mx, my);
+      }
+      pinchDist = d;
+    }
+  }, { passive: true });
+  c.addEventListener('touchend', () => { dragging = false; pinchDist = 0; });
+}
+function touchDist(e){
+  const dx = e.touches[0].clientX - e.touches[1].clientX;
+  const dy = e.touches[0].clientY - e.touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+function applySeed(s){
+  currentSeed = s >>> 0;
+  const a = (currentSeed % 9973) / 9973, b = ((currentSeed * 7) % 7919) / 7919;
+  U.uSeed.value.set(a * 200 - 100, b * 200 - 100);
+  updateSeedLabel();
+}
+
+
+/* ============================================================
+   Body segmentation
+   TensorFlow.js body-segmentation with the tfjs runtime, read out
+   via toBinaryMask/ImageData. This runs on its own async loop at
+   roughly segFps and writes into a small canvas; the render loop
+   never waits on it. Temporal smoothing is done by compositing each
+   new mask over the previous one at partial alpha, which removes
+   most of the per-frame jitter at the silhouette edge.
+   ============================================================ */
+let video = null, segmenter = null, rawCanvas = null, rawCtx = null;
+let maskCanvas = null, maskCtx = null, maskTex = null;
+let slowCanvas = null, slowCtx = null, slowTex = null;
+let segRunning = false, segReady = false, camState = 'off';
+
+const MASK_W = 256, MASK_H = 256;
+
+function setCamState(state, msg){
+  camState = state;
+  const dot = document.getElementById('camDot');
+  const el  = document.getElementById('camMsg');
+  if (dot){ dot.classList.toggle('live', state === 'live'); dot.classList.toggle('err', state === 'error'); }
+  if (el) el.textContent = msg;
+}
+
+function makeMaskCanvases(){
+  if (maskCanvas) return;
+  rawCanvas = document.createElement('canvas');
+  rawCanvas.width = MASK_W; rawCanvas.height = MASK_H;
+  rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+
+  maskCanvas = document.createElement('canvas');
+  maskCanvas.width = MASK_W; maskCanvas.height = MASK_H;
+  maskCtx = maskCanvas.getContext('2d');
+  maskCtx.fillStyle = '#000';
+  maskCtx.fillRect(0, 0, MASK_W, MASK_H);
+
+  // a second, heavily lagged copy; the difference between the two is motion
+  slowCanvas = document.createElement('canvas');
+  slowCanvas.width = MASK_W; slowCanvas.height = MASK_H;
+  slowCtx = slowCanvas.getContext('2d');
+  slowCtx.fillStyle = '#000';
+  slowCtx.fillRect(0, 0, MASK_W, MASK_H);
+
+  maskTex = new THREE.CanvasTexture(maskCanvas);
+  slowTex = new THREE.CanvasTexture(slowCanvas);
+  for (const t of [maskTex, slowTex]){
+    t.minFilter = THREE.LinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.wrapS = THREE.ClampToEdgeWrapping;
+    t.wrapT = THREE.ClampToEdgeWrapping;
+  }
+  U.uMask.value = maskTex;
+  U.uMaskSlow.value = slowTex;
+}
+
+async function startCamera(){
+  if (segRunning) return;
+  makeMaskCanvases();
+  setCamState('loading', 'starting camera');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false,
+    });
+    video = document.createElement('video');
+    video.playsInline = true; video.muted = true; video.srcObject = stream;
+    await video.play();
+  } catch (e){
+    setCamState('error', 'camera blocked');
+    console.warn('Camera unavailable:', e);
+    return;
+  }
+
+  setCamState('loading', 'loading model');
+  try {
+    if (window.tf && tf.setBackend) { await tf.setBackend('webgl'); await tf.ready(); }
+    segmenter = await bodySegmentation.createSegmenter(
+      bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation,
+      { runtime: 'tfjs', modelType: 'general' }
+    );
+  } catch (e){
+    setCamState('error', 'model failed');
+    console.warn('Segmenter failed:', e);
+    return;
+  }
+
+  updateMaskFit();
+  segRunning = true;
+  setCamState('live', 'camera live');
+  segLoop();
+}
+
+function stopCamera(){
+  segRunning = false; segReady = false;
+  U.uHasMask.value = 0;
+  if (video && video.srcObject){
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+  video = null;
+  setCamState('off', 'camera off');
+}
+
+// cover-fit the camera frame across the canvas
+function updateMaskFit(){
+  if (!video || !video.videoWidth) return;
+  const va = video.videoWidth / video.videoHeight;
+  const ca = window.innerWidth / window.innerHeight;
+  let sx = 1, sy = 1;
+  if (va > ca) sx = ca / va; else sy = va / ca;
+  U.uMaskScale.value.set(sx, sy);
+  U.uMaskOffset.value.set((1 - sx) * 0.5, (1 - sy) * 0.5);
+}
+
+async function segLoop(){
+  while (segRunning){
+    const t0 = performance.now();
+    try {
+      if (video && video.readyState >= 2 && segmenter){
+        // downscale into a square working canvas first; the model is happier
+        // with a small consistent input and it keeps the cost predictable
+        rawCtx.drawImage(video, 0, 0, MASK_W, MASK_H);
+        const people = await segmenter.segmentPeople(rawCanvas, { flipHorizontal: false });
+        if (people && people.length){
+          const img = await bodySegmentation.toBinaryMask(
+            people,
+            { r: 255, g: 255, b: 255, a: 255 },   // body
+            { r: 0,   g: 0,   b: 0,   a: 255 },   // ground
+            false, 0.55
+          );
+          rawCtx.putImageData(img, 0, 0);
+          // exponential smoothing: new mask laid over the old at partial alpha
+          maskCtx.globalAlpha = 1 - CONFIG.maskSmooth;
+          maskCtx.drawImage(rawCanvas, 0, 0);
+          maskCtx.globalAlpha = 1;
+          maskTex.needsUpdate = true;
+
+          // the lagged copy trails far behind; where it disagrees with the
+          // current mask is exactly where the person has just moved
+          slowCtx.globalAlpha = 1 - CONFIG.motionLag;
+          slowCtx.drawImage(maskCanvas, 0, 0);
+          slowCtx.globalAlpha = 1;
+          slowTex.needsUpdate = true;
+          segReady = true;
+          U.uHasMask.value = 1;
+        }
+      }
+    } catch (e){
+      console.warn('segmentation frame skipped:', e);
+    }
+    const budget = 1000 / Math.max(4, CONFIG.segFps);
+    const spent = performance.now() - t0;
+    await new Promise(r => setTimeout(r, Math.max(0, budget - spent)));
+  }
+}
+
+function setBodyMode(n){
+  CONFIG.bodyMode = Math.min(5, Math.max(1, n));
+  const el = document.getElementById('bodyModeVal');
+  if (el) el.textContent = BODY_MODES[CONFIG.bodyMode];
+  const sel = document.getElementById('bodyModeSel');
+  if (sel) sel.value = CONFIG.bodyMode;
+}
+function cycleBodyMode(){ setBodyMode(CONFIG.bodyMode % 5 + 1); }
+
+/* ---------------- journey ---------------- */
+function h1(i){ const s = Math.sin(i * 127.1 + currentSeed * 0.0001) * 43758.5453; return s - Math.floor(s); }
+function vnoise(t){ const i = Math.floor(t), f = t - i, u = f*f*(3-2*f); return h1(i)*(1-u) + h1(i+1)*u; }
+function journeyPos(){
+  const per = Math.max(2, CONFIG.stateSeconds);
+  let pos = (T/per + (vnoise(T*0.004 + 31.7) - 0.5)*0.9) % NSTATES;
+  if (pos < 0) pos += NSTATES;
+  return pos;
+}
+
+const blended = {};
+function computeBlend(){
+  const pos = CONFIG.manual ? ((CONFIG.manualPos % NSTATES) + NSTATES) % NSTATES : journeyPos();
+  const weights = new Array(NSTATES).fill(0);
+  let sum = 0;
+  const W = 1.15;
+  for (let i = 0; i < NSTATES; i++){
+    let d = Math.abs(pos - i); d = Math.min(d, NSTATES - d);
+    let w = 1 - d/W;
+    if (w > 0){ w = w*w*(3-2*w); weights[i] = w; sum += w; }
+  }
+  for (let i = 0; i < NSTATES; i++) weights[i] /= sum;
+
+  for (const k of NUM_KEYS){
+    let v = 0;
+    for (let i = 0; i < NSTATES; i++) v += (STATES[i][k] ?? SDEF[k]) * weights[i];
+    blended[k] = v;
+  }
+  for (const k of COL_KEYS){
+    let r=0,g=0,b=0;
+    for (let i = 0; i < NSTATES; i++){ const c = STATES[i][k]; const w = weights[i]; r+=c[0]*w; g+=c[1]*w; b+=c[2]*w; }
+    U['u'+k.toUpperCase()].value.set(r/255, g/255, b/255);
+  }
+
+  blended.warp   *= CONFIG.warp;
+  blended.relief *= CONFIG.relief;
+  blended.gloss  *= CONFIG.gloss;
+  blended.zoom   *= CONFIG.detail;
+
+  for (const k of NUM_KEYS) U[uName(k)].value = blended[k];
+  U.uBrightness.value = CONFIG.brightness;
+  U.uContrast.value = CONFIG.contrast;
+  U.uDepthMul.value = CONFIG.depth;
+
+  let best = 0;
+  for (let i = 1; i < NSTATES; i++) if (weights[i] > weights[best]) best = i;
+  if (STATES[best].name !== lastReading){
+    lastReading = STATES[best].name;
+    const el = document.getElementById('readingName');
+    if (el) el.textContent = lastReading;
+  }
+}
+
+// colors are passed 0-255; fix albedo mixes that expect 0-1 by normalizing here
+// (shader divides c5/c4 where needed; base albedo colors must be 0-1)
+// We normalize base palette in the shader by dividing all uC* by 255 at use.
+// To keep the shader simple we instead pass normalized colors:
+function normalizeColorUniforms(){ /* handled inline: see computeBlend note */ }
+
+/* ---------------- loop ---------------- */
+let lastT = performance.now();
+function loop(now){
+  const dt = Math.min((now - lastT)/1000, 0.05);
+  lastT = now;
+  if (!CONFIG.paused){
+    T += dt * CONFIG.animationSpeed;
+    ringPhase += dt * CONFIG.animationSpeed * 0.010;
+  }
+  computeBlend();
+  U.uTime.value = T;
+  U.uRingPhase.value = ringPhase;
+  U.uPan.value.set((vnoise(T*0.006 + 3.1) - 0.5)*1.4, (vnoise(T*0.006 + 71.7) - 0.5)*1.4);
+  U.uRingC.value.set((vnoise(T*0.005 + 11.3) - 0.5)*1.1 + U.uPan.value.x,
+                     (vnoise(T*0.005 + 43.9) - 0.5)*1.1 + U.uPan.value.y);
+  U.uCamPan.value.set(camPanX, camPanY);
+  U.uCamZoom.value = camZoom;
+
+  U.uBodyMode.value     = CONFIG.bodyMode;
+  U.uMirror.value       = CONFIG.mirror ? 1 : 0;
+  U.uEdgeWidth.value    = CONFIG.edgeWidth;
+  U.uEdgeSharp.value    = CONFIG.edgeSharp;
+  U.uBodyStrength.value = CONFIG.bodyStrength;
+  U.uMotionAmp.value    = CONFIG.motionAmp;
+  U.uOutlineGlow.value  = CONFIG.outlineGlow;
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- UI ---------------- */
+function togglePanel(){ panelOpen = !panelOpen; document.getElementById('panel').classList.toggle('open', panelOpen); }
+function setPaused(v){ CONFIG.paused = v; const b = document.getElementById('pauseBtn'); if (b) b.textContent = v ? 'Resume' : 'Pause'; }
+function updateSeedLabel(){ const el = document.getElementById('seedVal'); if (el) el.textContent = currentSeed; }
+function updateZoomLabel(){ const el = document.getElementById('zoomVal'); if (el) el.textContent = camZoom.toFixed(2) + '×'; }
+
+/* ---------------- recording ---------------- */
+let mediaRecorder = null, recChunks = [], recording = false, recStart = 0, recTimer = null;
+function pickMime(){
+  const opts = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  for (const m of opts) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+function toggleRecord(){ recording ? stopRecord() : startRecord(); }
+function startRecord(){
+  if (!renderer || !renderer.domElement.captureStream || !window.MediaRecorder){
+    alert('Recording is not supported in this browser. Try Chrome.'); return;
+  }
+  const mime = pickMime();
+  const stream = renderer.domElement.captureStream(60);
+  recChunks = [];
+  try { mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 40000000 } : { videoBitsPerSecond: 40000000 }); }
+  catch(e){ mediaRecorder = new MediaRecorder(stream); }
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recChunks, { type: mime || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    a.href = url; a.download = 'material-witness_' + stamp + '_seed' + currentSeed + '.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+  mediaRecorder.start(1000);
+  recording = true; recStart = performance.now();
+  document.getElementById('rec').classList.add('on');
+  const btn = document.getElementById('recBtn');
+  if (btn){ btn.textContent = 'Stop recording'; btn.style.borderColor = '#d8443f'; btn.style.color = '#e6d2cc'; }
+  recTimer = setInterval(updateRecTime, 500); updateRecTime();
+}
+function stopRecord(){
+  if (mediaRecorder && recording) mediaRecorder.stop();
+  recording = false;
+  document.getElementById('rec').classList.remove('on');
+  const btn = document.getElementById('recBtn');
+  if (btn){ btn.textContent = 'Record video'; btn.style.borderColor = ''; btn.style.color = ''; }
+  if (recTimer){ clearInterval(recTimer); recTimer = null; }
+}
+function updateRecTime(){
+  const s = Math.floor((performance.now() - recStart)/1000);
+  document.getElementById('recTime').textContent = 'REC ' + Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+
+function buildUI(){
+  const box = document.getElementById('controls');
+  box.innerHTML = '';
+
+  for (const b of BINDINGS){
+    const wrap = document.createElement('div'); wrap.className = 'ctl';
+    const label = document.createElement('label');
+    const name = document.createElement('span'); name.textContent = b.label;
+    const val = document.createElement('span'); val.className = 'val';
+    label.appendChild(name); label.appendChild(val);
+    const input = document.createElement('input');
+    input.type = 'range'; input.min = b.min; input.max = b.max; input.step = b.step; input.value = CONFIG[b.key];
+    const show = v => { val.textContent = b.fmt ? b.fmt(v) : Number(v).toFixed(2); };
+    show(CONFIG[b.key]);
+    input.addEventListener('input', () => {
+      CONFIG[b.key] = parseFloat(input.value); show(CONFIG[b.key]);
+      if (b.key === 'quality') onResize();
+    });
+    wrap.appendChild(label); wrap.appendChild(input);
+    box.appendChild(wrap);
+  }
+
+  box.appendChild(Object.assign(document.createElement('hr'), { className: 'divider' }));
+
+  // ---- body / camera ----
+  const bh = document.createElement('div');
+  bh.className = 'seedline';
+  bh.innerHTML = 'BODY &nbsp;·&nbsp; <b id="bodyModeVal">' + BODY_MODES[CONFIG.bodyMode] + '</b>';
+  box.appendChild(bh);
+
+  const mw = document.createElement('div'); mw.className = 'ctl';
+  const ml = document.createElement('label'); ml.innerHTML = '<span>Disturbance (keys 1-5)</span>';
+  const msel = document.createElement('select'); msel.id = 'bodyModeSel';
+  for (let i = 1; i <= 5; i++){
+    const o = document.createElement('option');
+    o.value = i; o.textContent = i + '  ' + BODY_MODES[i];
+    msel.appendChild(o);
+  }
+  msel.value = CONFIG.bodyMode;
+  msel.addEventListener('change', () => { setBodyMode(parseInt(msel.value, 10)); msel.blur(); });
+  mw.appendChild(ml); mw.appendChild(msel); box.appendChild(mw);
+
+  for (const b of BODY_BINDINGS){
+    const wrap = document.createElement('div'); wrap.className = 'ctl';
+    const label = document.createElement('label');
+    const name = document.createElement('span'); name.textContent = b.label;
+    const val = document.createElement('span'); val.className = 'val';
+    label.appendChild(name); label.appendChild(val);
+    const input = document.createElement('input');
+    input.type = 'range'; input.min = b.min; input.max = b.max; input.step = b.step; input.value = CONFIG[b.key];
+    const show = v => { val.textContent = Number(v).toFixed(2); };
+    show(CONFIG[b.key]);
+    input.addEventListener('input', () => { CONFIG[b.key] = parseFloat(input.value); show(CONFIG[b.key]); });
+    input.addEventListener('change', () => input.blur());
+    wrap.appendChild(label); wrap.appendChild(input);
+    box.appendChild(wrap);
+  }
+
+  const rowCam = document.createElement('div'); rowCam.className = 'row';
+  const camBtn = document.createElement('button'); camBtn.id = 'camBtn';
+  camBtn.textContent = segRunning ? 'Stop camera' : 'Start camera';
+  camBtn.addEventListener('click', () => {
+    if (segRunning){ stopCamera(); camBtn.textContent = 'Start camera'; }
+    else { startCamera(); camBtn.textContent = 'Stop camera'; }
+  });
+  const mirBtn = document.createElement('button');
+  mirBtn.textContent = CONFIG.mirror ? 'Mirrored' : 'Not mirrored';
+  mirBtn.addEventListener('click', () => {
+    CONFIG.mirror = !CONFIG.mirror;
+    mirBtn.textContent = CONFIG.mirror ? 'Mirrored' : 'Not mirrored';
+  });
+  rowCam.appendChild(camBtn); rowCam.appendChild(mirBtn);
+  box.appendChild(rowCam);
+
+  // manual scrub
+  const sw = document.createElement('div'); sw.className = 'ctl';
+  const sl = document.createElement('label');
+  const sName = document.createElement('span'); sName.textContent = 'State';
+  const sVal = document.createElement('span'); sVal.className = 'val'; sVal.id = 'scrubName';
+  sl.appendChild(sName); sl.appendChild(sVal);
+  const scrub = document.createElement('input');
+  scrub.type = 'range'; scrub.min = 0; scrub.max = NSTATES; scrub.step = 0.01; scrub.id = 'scrub';
+  scrub.value = CONFIG.manual ? CONFIG.manualPos : 0;
+  const scrubName = v => { sVal.textContent = STATES[Math.round(v) % NSTATES].name; };
+  scrubName(parseFloat(scrub.value));
+  scrub.addEventListener('input', () => {
+    CONFIG.manual = true; CONFIG.manualPos = parseFloat(scrub.value); scrubName(CONFIG.manualPos);
+    const mb = document.getElementById('modeBtn'); if (mb) mb.textContent = 'Resume journey';
+  });
+  sw.appendChild(sl); sw.appendChild(scrub); box.appendChild(sw);
+
+  const rowMode = document.createElement('div'); rowMode.className = 'row';
+  const modeBtn = document.createElement('button'); modeBtn.id = 'modeBtn';
+  modeBtn.textContent = CONFIG.manual ? 'Resume journey' : 'Manual scrub';
+  modeBtn.addEventListener('click', () => {
+    CONFIG.manual = !CONFIG.manual;
+    modeBtn.textContent = CONFIG.manual ? 'Resume journey' : 'Manual scrub';
+    if (CONFIG.manual){
+      const pos = journeyPos(); CONFIG.manualPos = pos;
+      const s = document.getElementById('scrub'); if (s) s.value = pos; scrubName(pos);
+    }
+  });
+  rowMode.appendChild(modeBtn); box.appendChild(rowMode);
+
+  box.appendChild(Object.assign(document.createElement('hr'), { className: 'divider' }));
+
+  const row1 = document.createElement('div'); row1.className = 'row';
+  const pauseBtn = document.createElement('button'); pauseBtn.id = 'pauseBtn';
+  pauseBtn.textContent = CONFIG.paused ? 'Resume' : 'Pause';
+  pauseBtn.addEventListener('click', () => setPaused(!CONFIG.paused));
+  const fsBtn = document.createElement('button'); fsBtn.textContent = 'Fullscreen';
+  fsBtn.addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); });
+  row1.appendChild(pauseBtn); row1.appendChild(fsBtn); box.appendChild(row1);
+
+  const rowZoom = document.createElement('div'); rowZoom.className = 'row';
+  const zInB = document.createElement('button'); zInB.textContent = 'Zoom +';
+  zInB.addEventListener('click', () => zoomBy(1.2));
+  const zOutB = document.createElement('button'); zOutB.textContent = 'Zoom −';
+  zOutB.addEventListener('click', () => zoomBy(1/1.2));
+  const zRes = document.createElement('button'); zRes.textContent = 'Reset view';
+  zRes.addEventListener('click', resetView);
+  rowZoom.appendChild(zInB); rowZoom.appendChild(zOutB); rowZoom.appendChild(zRes);
+  box.appendChild(rowZoom);
+
+  const zline = document.createElement('div'); zline.className = 'seedline';
+  zline.innerHTML = 'zoom <b id="zoomVal">1.00×</b>'; box.appendChild(zline); updateZoomLabel();
+
+  const row2 = document.createElement('div'); row2.className = 'row';
+  const seedBtn = document.createElement('button'); seedBtn.textContent = 'Randomize seed';
+  seedBtn.addEventListener('click', () => applySeed(Math.floor(Math.random()*99999999)));
+  const resetBtn = document.createElement('button'); resetBtn.textContent = 'Reset defaults';
+  resetBtn.addEventListener('click', () => { for (const k in DEFAULTS) if (k !== 'seed') CONFIG[k] = DEFAULTS[k]; buildUI(); onResize(); setPaused(false); });
+  row2.appendChild(seedBtn); row2.appendChild(resetBtn); box.appendChild(row2);
+
+  const row3 = document.createElement('div'); row3.className = 'row';
+  const recBtn = document.createElement('button'); recBtn.id = 'recBtn';
+  recBtn.textContent = recording ? 'Stop recording' : 'Record video';
+  if (recording){ recBtn.style.borderColor = '#d8443f'; recBtn.style.color = '#e6d2cc'; }
+  recBtn.addEventListener('click', toggleRecord);
+  row3.appendChild(recBtn); box.appendChild(row3);
+
+  const seedline = document.createElement('div'); seedline.className = 'seedline';
+  seedline.innerHTML = 'seed <b id="seedVal"></b>'; box.appendChild(seedline); updateSeedLabel();
+}
+
+init();
+</script>
+</body>
+</html>
